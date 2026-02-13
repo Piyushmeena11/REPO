@@ -1183,7 +1183,7 @@ async def txt_handler(bot: Client, m: Message):
         
         "<i>ᴇxᴛʀᴀᴄᴛᴇᴅ ʙʏ ᴡɪᴢᴀʀᴅ ʙᴏᴛꜱ 🤖</i>"
     )
-    ),
+    ,
     message_thread_id=topic_id
 )
 
