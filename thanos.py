@@ -25,6 +25,15 @@ import m3u8
 from urllib.parse import urljoin
 from vars import *  # Add this import
 from db import Database
+try:
+    from aiohttp_socks import ProxyConnector
+except ImportError:
+    ProxyConnector = None
+
+# Proxy and Header Configuration
+PROXY_URL = "socks5://127.0.0.1:1080"
+REQUESTS_PROXY = {'http': 'socks5h://127.0.0.1:1080', 'https': 'socks5h://127.0.0.1:1080'}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
 
 
@@ -97,8 +106,9 @@ def pull_run(work, cmds):
         fut = executor.map(exec,cmds)
 async def aio(url,name):
     k = f'{name}.pdf'
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+    connector = ProxyConnector.from_url(PROXY_URL, rdns=True) if ProxyConnector else None
+    async with aiohttp.ClientSession(connector=connector) as session:
+        async with session.get(url, headers=HEADERS) as resp:
             if resp.status == 200:
                 f = await aiofiles.open(k, mode='wb')
                 await f.write(await resp.read())
@@ -108,8 +118,9 @@ async def aio(url,name):
 
 async def download(url,name):
     ka = f'{name}.pdf'
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+    connector = ProxyConnector.from_url(PROXY_URL, rdns=True) if ProxyConnector else None
+    async with aiohttp.ClientSession(connector=connector) as session:
+        async with session.get(url, headers=HEADERS) as resp:
             if resp.status == 200:
                 f = await aiofiles.open(ka, mode='wb')
                 await f.write(await resp.read())
@@ -119,7 +130,7 @@ async def download(url,name):
 async def pdf_download(url, file_name, chunk_size=1024 * 10):
     if os.path.exists(file_name):
         os.remove(file_name)
-    r = requests.get(url, allow_redirects=True, stream=True)
+    r = requests.get(url, allow_redirects=True, stream=True, proxies=REQUESTS_PROXY, headers=HEADERS)
     with open(file_name, 'wb') as fd:
         for chunk in r.iter_content(chunk_size=chunk_size):
             if chunk:
@@ -180,7 +191,7 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --external-downloader aria2c "{mpd_url}"'
+        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --proxy {PROXY_URL} --external-downloader aria2c --downloader-args "aria2c: --all-proxy={PROXY_URL}" "{mpd_url}"'
         print(f"Running command: {cmd1}")
         os.system(cmd1)
         
@@ -254,7 +265,7 @@ async def run(cmd):
 def old_download(url, file_name, chunk_size = 1024 * 10 * 10):
     if os.path.exists(file_name):
         os.remove(file_name)
-    r = requests.get(url, allow_redirects=True, stream=True)
+    r = requests.get(url, allow_redirects=True, stream=True, proxies=REQUESTS_PROXY, headers=HEADERS)
     with open(file_name, 'wb') as fd:
         for chunk in r.iter_content(chunk_size=chunk_size):
             if chunk:
@@ -287,8 +298,9 @@ async def fast_download(url, name):
         try:
             if "m3u8" in url:
                 # Handle m3u8 files
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
+                connector = ProxyConnector.from_url(PROXY_URL, rdns=True) if ProxyConnector else None
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    async with session.get(url, headers=HEADERS) as response:
                         m3u8_text = await response.text()
                         
                     playlist = m3u8.loads(m3u8_text)
@@ -298,11 +310,11 @@ async def fast_download(url, name):
                         
                         # Download all segments concurrently
                         segments = []
-                        async with aiohttp.ClientSession() as session:
+                        async with aiohttp.ClientSession(connector=connector) as session:
                             tasks = []
                             for segment in playlist.segments:
                                 segment_url = urljoin(base_url, segment.uri)
-                                task = asyncio.create_task(session.get(segment_url))
+                                task = asyncio.create_task(session.get(segment_url, headers=HEADERS))
                                 tasks.append(task)
                             
                             responses = await asyncio.gather(*tasks)
@@ -320,15 +332,16 @@ async def fast_download(url, name):
                         return [output_file]
                     else:
                         # For live streams, fall back to ffmpeg
-                        cmd = f'ffmpeg -hide_banner -loglevel error -stats -i "{url}" -c copy -bsf:a aac_adtstoasc -movflags +faststart "{name}.mp4"'
+                        cmd = f'ffmpeg -hide_banner -loglevel error -stats -http_proxy {PROXY_URL} -i "{url}" -c copy -bsf:a aac_adtstoasc -movflags +faststart "{name}.mp4"'
                         subprocess.run(cmd, shell=True)
                         if os.path.exists(f"{name}.mp4"):
                             success = True
                             return [f"{name}.mp4"]
             else:
                 # For direct video URLs
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
+                connector = ProxyConnector.from_url(PROXY_URL, rdns=True) if ProxyConnector else None
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    async with session.get(url, headers=HEADERS) as response:
                         if response.status == 200:
                             output_file = f"{name}.mp4"
                             with open(output_file, 'wb') as f:
@@ -359,7 +372,7 @@ async def download_video(url, cmd, name):
     while retry_count < max_retries:
 
 
-        download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -j 32"'
+        download_cmd = f'{cmd} --proxy {PROXY_URL} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -j 32 --all-proxy={PROXY_URL}"'
         print(download_cmd)
         logging.info(download_cmd)
 
