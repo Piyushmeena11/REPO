@@ -86,7 +86,7 @@ def duration(filename):
 
 
 def get_mps_and_keys(api_url):
-    response = requests.get(api_url)
+    response = requests.get(api_url, proxies=REQUESTS_PROXY, headers=HEADERS)
     response_json = response.json()
     mpd = response_json.get('mpd_url')
     keys = response_json.get('keys')
